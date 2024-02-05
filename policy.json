@@ -1,0 +1,18 @@
+{
+	"targets": {
+		"tank/os/main": {
+			"keep": {
+				"frequent": 4,
+				"hourly": 24,
+				"daily": 30,
+				"weekly": 8,
+				"monthly": 12
+			}
+		},
+		"tank/music": {
+			"keep": {
+				"daily": 90
+			}
+		}
+	}
+}
