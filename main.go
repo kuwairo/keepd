@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"flag"
 	"log"
 	"os"
@@ -19,11 +20,11 @@ type Policy struct {
 
 type Plan struct {
 	Keep struct {
-		Frequent uint `json:"frequent"`
-		Hourly   uint `json:"hourly"`
-		Daily    uint `json:"daily"`
-		Weekly   uint `json:"weekly"`
-		Monthly  uint `json:"monthly"`
+		Frequent uint `json:"frequent,omitempty"`
+		Hourly   uint `json:"hourly,omitempty"`
+		Daily    uint `json:"daily,omitempty"`
+		Weekly   uint `json:"weekly,omitempty"`
+		Monthly  uint `json:"monthly,omitempty"`
 	} `json:"keep"`
 }
 
@@ -47,8 +48,19 @@ func main() {
 		}
 	}
 
-	_, err := os.ReadFile(*policyPath)
+	f, err := os.Open(*policyPath)
 	if err != nil {
-		log.Fatalf("cannot read policy file: %s\n", err)
+		log.Fatalf("cannot open policy file: %s\n", err)
 	}
+	defer f.Close()
+
+	dec := json.NewDecoder(f)
+	dec.DisallowUnknownFields()
+
+	var policy Policy
+	if err := dec.Decode(&policy); err != nil {
+		log.Fatalf("cannot parse policy file: %s\n", err)
+	}
+
+	log.Printf("%+v\n", policy)
 }
