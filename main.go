@@ -1,66 +1,262 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"flag"
+	"fmt"
 	"log"
 	"os"
+	"reflect"
+	"regexp"
+	"strconv"
+	"strings"
+	"time"
 )
-
-const (
-	PrefixMinLength   = 1
-	PrefixMaxLength   = 32
-	DefaultPrefix     = "keepd"
-	DefaultPolicyPath = "./policy.json" // TODO: change
-)
-
-type Policy struct {
-	Targets map[string]Plan `json:"targets"`
-}
 
 type Plan struct {
 	Keep struct {
-		Frequent uint `json:"frequent,omitempty"`
-		Hourly   uint `json:"hourly,omitempty"`
-		Daily    uint `json:"daily,omitempty"`
-		Weekly   uint `json:"weekly,omitempty"`
-		Monthly  uint `json:"monthly,omitempty"`
-	} `json:"keep"`
+		Frequent *uint
+		Hourly   *uint
+		Daily    *uint
+		Weekly   *uint
+		Monthly  *uint
+	}
 }
 
-// TODO: keepd.2006-01-02.15:04:05.frequent
+type Policy struct {
+	Prefix  string
+	Targets map[string]Plan
+}
 
-func main() {
-	prefix := flag.String("n", DefaultPrefix, "prefix for snapshot names")
-	policyPath := flag.String("p", DefaultPolicyPath, "path to the policy file")
-	flag.Parse()
-
-	switch {
-	case len(*prefix) < PrefixMinLength:
-		log.Fatalln("prefix length is too short")
-	case len(*prefix) > PrefixMaxLength:
-		log.Fatalln("prefix length is too long")
-	}
-
-	for _, r := range *prefix {
-		if r < 'a' || r > 'z' {
-			log.Fatalln("prefix contains non-alphabetic characters (not a-z)")
-		}
-	}
-
-	f, err := os.Open(*policyPath)
+func LoadPolicy(path string) (*Policy, error) {
+	f, err := os.Open(path)
 	if err != nil {
-		log.Fatalf("cannot open policy file: %s\n", err)
+		return nil, fmt.Errorf("cannot open policy file: %w", err)
 	}
 	defer f.Close()
 
 	dec := json.NewDecoder(f)
 	dec.DisallowUnknownFields()
 
-	var policy Policy
-	if err := dec.Decode(&policy); err != nil {
-		log.Fatalf("cannot parse policy file: %s\n", err)
+	var p Policy
+	if err := dec.Decode(&p); err != nil {
+		return nil, fmt.Errorf("cannot parse policy file: %w", err)
 	}
 
-	log.Printf("%+v\n", policy)
+	if p.Prefix == "" {
+		return nil, errors.New("prefix is not specified")
+	}
+
+	for _, r := range p.Prefix {
+		if r < 'a' || r > 'z' {
+			return nil, errors.New("prefix contains forbidden characters (not a-z)")
+		}
+	}
+
+	return &p, nil
+}
+
+func (p *Policy) ExtractPools() []string {
+	m := make(map[string]struct{})
+	for t := range p.Targets {
+		parts := strings.Split(t, "/")
+		m[parts[0]] = struct{}{}
+	}
+
+	pools := make([]string, 0, len(m))
+	for p := range m {
+		pools = append(pools, p)
+	}
+
+	return pools
+}
+
+type Service struct {
+	policy      *Policy
+	pools       []string
+	regexpByTag map[string]*regexp.Regexp
+	// TODO: inject event logger
+}
+
+func NewService(policy *Policy) *Service {
+	// TODO: should this be part of service initialization?
+	t := reflect.TypeOf(Plan{}.Keep)
+	m := make(map[string]*regexp.Regexp, t.NumField())
+	base := `\.\d{4}-\d{2}-\d{2}\.\d{2}:\d{2}:\d{2}\.`
+	for i := 0; i < t.NumField(); i++ {
+		n := strings.ToLower(t.Field(i).Name)
+		m[n] = regexp.MustCompile("(?m)" + policy.Prefix + base + n + "$")
+	}
+
+	return &Service{
+		policy:      policy,
+		pools:       policy.ExtractPools(),
+		regexpByTag: m,
+	}
+}
+
+func (s *Service) Enforce(keepFn func(Plan) (string, *uint)) {
+	for t, p := range s.policy.Targets {
+		tag, keep := keepFn(p)
+		if keep == nil {
+			continue
+		}
+
+		log.Printf("enforcing %q (keep %d) for target %q\n", tag, *keep, t)
+
+		if *keep > 0 {
+			if err := CreateSnapshot(t, s.policy.Prefix, tag); err != nil {
+				log.Printf("cannot snapshot target %q: %s\n", t, err)
+			}
+		}
+
+		names, err := ListSnapshotNames(t, s.regexpByTag[tag])
+		if err != nil {
+			log.Printf("cannot list snapshots of target %q: %s\n", t, err)
+			continue
+		}
+		if len(names) <= int(*keep) {
+			continue
+		}
+
+		for _, n := range names[int(*keep):] {
+			if err := DestroySnapshot(t, string(n)); err != nil {
+				log.Printf("cannot destroy snapshot \"%s@%s\": %s\n", t, n, err)
+			}
+		}
+	}
+}
+
+func (s *Service) FrequentJob() {
+	s.Enforce(func(p Plan) (string, *uint) {
+		return "frequent", p.Keep.Frequent
+	})
+}
+
+func (s *Service) RegularJob(tick time.Time) {
+	s.FrequentJob()
+	s.Enforce(func(p Plan) (string, *uint) {
+		return "hourly", p.Keep.Hourly
+	})
+
+	weekYear, week := tick.ISOWeek()
+	year, month, yearDay := tick.Year(), tick.Month(), tick.YearDay()
+
+	jobsByTag := map[string]struct {
+		LastRunTimestamp *int64
+		TriggerFn        func(int64) bool
+	}{
+		"Daily": {nil, func(lrt int64) bool {
+			t := time.Unix(lrt, 0)
+			dayChanged := year != t.Year() || yearDay != t.YearDay()
+			if dayChanged {
+				s.Enforce(func(p Plan) (string, *uint) {
+					return "daily", p.Keep.Daily
+				})
+			}
+			return dayChanged
+		}},
+		"Weekly": {nil, func(lrt int64) bool {
+			tWeekYear, tWeek := time.Unix(lrt, 0).ISOWeek()
+			weekChanged := weekYear != tWeekYear || week != tWeek
+			if weekChanged {
+				s.Enforce(func(p Plan) (string, *uint) {
+					return "weekly", p.Keep.Weekly
+				})
+			}
+			return weekChanged
+		}},
+		"Monthly": {nil, func(lrt int64) bool {
+			t := time.Unix(lrt, 0)
+			monthChanged := year != t.Year() || month != t.Month()
+			if monthChanged {
+				s.Enforce(func(p Plan) (string, *uint) {
+					return "monthly", p.Keep.Monthly
+				})
+			}
+			return monthChanged
+		}},
+	}
+
+	keyFormat := "org.keepd:last%sJob"
+
+	for _, p := range s.pools {
+		for t, job := range jobsByTag {
+			key := fmt.Sprintf(keyFormat, t)
+			value, err := GetPoolProperty(p, key)
+			if err != nil {
+				switch {
+				case errors.Is(err, ErrInvalidProperty):
+				case errors.Is(err, ErrPoolNotFound):
+					log.Printf("cannot access pool %q: %s\n", p, err)
+				default:
+					log.Printf("cannot get property %q of pool %q: %s\n", key, p, err)
+				}
+				continue
+			}
+
+			unixTime, err := strconv.ParseInt(value, 10, 64)
+			if err != nil {
+				log.Printf("invalid timestamp %q (property %q of pool %q)\n", value, key, p)
+				continue
+			}
+
+			if job.LastRunTimestamp == nil || unixTime > *job.LastRunTimestamp {
+				*job.LastRunTimestamp = unixTime
+			}
+		}
+	}
+
+	tickValue := strconv.FormatInt(tick.Unix(), 10)
+	for t, job := range jobsByTag {
+		var lrt int64
+		if job.LastRunTimestamp != nil {
+			lrt = *job.LastRunTimestamp
+		}
+		if jobRan := job.TriggerFn(lrt); !jobRan {
+			continue
+		}
+
+		key := fmt.Sprintf(keyFormat, t)
+		for _, p := range s.pools {
+			if err := SetPoolProperty(p, key, tickValue); err != nil {
+				log.Printf("cannot set property %q of pool %q: %s\n", key, p, err)
+			}
+		}
+	}
+}
+
+// TODO: handle signals
+func main() {
+	policyPath := flag.String("p", "", "path to the policy file")
+	flag.Parse()
+
+	if *policyPath == "" {
+		log.Fatalln("path to the policy file is not specified")
+	}
+
+	policy, err := LoadPolicy(*policyPath)
+	if err != nil {
+		log.Fatalf("cannot load the policy: %s\n", err)
+	}
+
+	service := NewService(policy)
+
+	ticker := time.NewTicker(time.Minute)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-context.TODO().Done():
+			return
+		case t := <-ticker.C:
+			switch t.Minute() {
+			case 0:
+				go service.RegularJob(t)
+			case 15, 30, 45:
+				go service.FrequentJob()
+			}
+		}
+	}
 }

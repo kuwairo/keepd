@@ -1,4 +1,5 @@
 {
+  "prefix": "keepd",
   "targets": {
     "tank/os/main": {
       "keep": {
