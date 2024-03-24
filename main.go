@@ -148,7 +148,7 @@ func (s *Service) RegularJob(tick time.Time) {
 		LastRunTimestamp *int64
 		TriggerFn        func(int64) bool
 	}{
-		"Daily": {nil, func(lrt int64) bool {
+		"daily": {nil, func(lrt int64) bool {
 			t := time.Unix(lrt, 0)
 			dayChanged := year != t.Year() || yearDay != t.YearDay()
 			if dayChanged {
@@ -158,7 +158,7 @@ func (s *Service) RegularJob(tick time.Time) {
 			}
 			return dayChanged
 		}},
-		"Weekly": {nil, func(lrt int64) bool {
+		"weekly": {nil, func(lrt int64) bool {
 			tWeekYear, tWeek := time.Unix(lrt, 0).ISOWeek()
 			weekChanged := weekYear != tWeekYear || week != tWeek
 			if weekChanged {
@@ -168,7 +168,7 @@ func (s *Service) RegularJob(tick time.Time) {
 			}
 			return weekChanged
 		}},
-		"Monthly": {nil, func(lrt int64) bool {
+		"monthly": {nil, func(lrt int64) bool {
 			t := time.Unix(lrt, 0)
 			monthChanged := year != t.Year() || month != t.Month()
 			if monthChanged {
@@ -180,7 +180,7 @@ func (s *Service) RegularJob(tick time.Time) {
 		}},
 	}
 
-	keyFormat := "org.keepd:last%sJob"
+	keyFormat := "org.keepd:last%sjob"
 
 	for _, p := range s.pools {
 		for t, job := range jobsByTag {
