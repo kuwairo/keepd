@@ -199,7 +199,7 @@ func (s *Service) RegularJob(tick time.Time) {
 
 			unixTime, err := strconv.ParseInt(value, 10, 64)
 			if err != nil {
-				log.Printf("invalid timestamp %q (property %q of pool %q)\n", value, key, p)
+				log.Printf("ignoring invalid timestamp %q (property %q of pool %q)\n", value, key, p)
 				continue
 			}
 

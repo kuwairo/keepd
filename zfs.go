@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"log"
 	"os/exec"
 	"regexp"
 	"strings"
@@ -17,11 +18,13 @@ var (
 	ErrInvalidProperty = errors.New("invalid property")
 )
 
-// TODO: use UTC for snapshot names
+// TODO: use UTC for snapshot names (make it an option in the policy?)
 // TODO: should check for 'permission denied'?
 func CreateSnapshot(target, prefix, tag string) error {
 	t := time.Now().Format("2006-01-02.15:04:05")
 	name := fmt.Sprintf("%s.%s.%s", prefix, t, tag)
+
+	log.Printf("[+] create snapshot %s@%s\n", target, name)
 
 	ds := &zfs.Dataset{Name: target}
 	_, err := ds.Snapshot(name, false)
@@ -30,6 +33,8 @@ func CreateSnapshot(target, prefix, tag string) error {
 
 // TODO: should check for 'permission denied'?
 func DestroySnapshot(target, name string) error {
+	log.Printf("[-] destroy snapshot %s@%s\n", target, name)
+
 	ds := &zfs.Dataset{Name: fmt.Sprintf("%s@%s", target, name)}
 	return ds.Destroy(0)
 }
@@ -87,7 +92,7 @@ func GetPoolProperty(pool, key string) (string, error) {
 func SetPoolProperty(pool, key, value string) error {
 	arg := []string{
 		"set",
-		fmt.Sprintf("%s=%q", key, value),
+		fmt.Sprintf("%s=%s", key, value),
 		pool,
 	}
 	c := exec.Command("zpool", arg...)
