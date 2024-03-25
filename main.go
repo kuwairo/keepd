@@ -81,7 +81,7 @@ type Service struct {
 }
 
 func NewService(policy *Policy) *Service {
-	// TODO: should this be part of service initialization?
+	// TODO: this shouldn't be part of service initialization
 	t := reflect.TypeOf(Plan{}.Keep)
 	m := make(map[string]*regexp.Regexp, t.NumField())
 	base := `\.\d{4}-\d{2}-\d{2}\.\d{2}:\d{2}:\d{2}\.`
@@ -144,11 +144,11 @@ func (s *Service) RegularJob(tick time.Time) {
 	weekYear, week := tick.ISOWeek()
 	year, month, yearDay := tick.Year(), tick.Month(), tick.YearDay()
 
-	jobsByTag := map[string]struct {
-		LastRunTimestamp *int64
+	jobsByTag := map[string]*struct {
+		LastRunTimestamp int64
 		TriggerFn        func(int64) bool
 	}{
-		"daily": {nil, func(lrt int64) bool {
+		"daily": {0, func(lrt int64) bool {
 			t := time.Unix(lrt, 0)
 			dayChanged := year != t.Year() || yearDay != t.YearDay()
 			if dayChanged {
@@ -158,7 +158,7 @@ func (s *Service) RegularJob(tick time.Time) {
 			}
 			return dayChanged
 		}},
-		"weekly": {nil, func(lrt int64) bool {
+		"weekly": {0, func(lrt int64) bool {
 			tWeekYear, tWeek := time.Unix(lrt, 0).ISOWeek()
 			weekChanged := weekYear != tWeekYear || week != tWeek
 			if weekChanged {
@@ -168,7 +168,7 @@ func (s *Service) RegularJob(tick time.Time) {
 			}
 			return weekChanged
 		}},
-		"monthly": {nil, func(lrt int64) bool {
+		"monthly": {0, func(lrt int64) bool {
 			t := time.Unix(lrt, 0)
 			monthChanged := year != t.Year() || month != t.Month()
 			if monthChanged {
@@ -202,20 +202,15 @@ func (s *Service) RegularJob(tick time.Time) {
 				log.Printf("ignoring invalid timestamp %q (property %q of pool %q)\n", value, key, p)
 				continue
 			}
-
-			if job.LastRunTimestamp == nil || unixTime > *job.LastRunTimestamp {
-				*job.LastRunTimestamp = unixTime
+			if unixTime > job.LastRunTimestamp {
+				job.LastRunTimestamp = unixTime
 			}
 		}
 	}
 
 	tickValue := strconv.FormatInt(tick.Unix(), 10)
 	for t, job := range jobsByTag {
-		var lrt int64
-		if job.LastRunTimestamp != nil {
-			lrt = *job.LastRunTimestamp
-		}
-		if jobRan := job.TriggerFn(lrt); !jobRan {
+		if jobRan := job.TriggerFn(job.LastRunTimestamp); !jobRan {
 			continue
 		}
 
