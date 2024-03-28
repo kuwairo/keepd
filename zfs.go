@@ -18,11 +18,15 @@ var (
 	ErrInvalidProperty = errors.New("invalid property")
 )
 
-// TODO: use UTC for snapshot names (make it an option in the policy?)
 // TODO: should check for 'permission denied'?
-func CreateSnapshot(target, prefix, tag string) error {
-	t := time.Now().Format("2006-01-02.15:04:05")
-	name := fmt.Sprintf("%s.%s.%s", prefix, t, tag)
+func CreateSnapshot(target, prefix, tag string, localTime bool) error {
+	t := time.Now()
+	if !localTime {
+		t = t.UTC()
+	}
+
+	f := t.Format("2006-01-02.15:04:05")
+	name := fmt.Sprintf("%s.%s.%s", prefix, f, tag)
 
 	log.Printf("[+] create snapshot %s@%s\n", target, name)
 

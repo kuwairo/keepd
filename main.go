@@ -27,8 +27,9 @@ type Plan struct {
 }
 
 type Policy struct {
-	Prefix  string
-	Targets map[string]Plan
+	Prefix    string
+	LocalTime bool
+	Targets   map[string]Plan
 }
 
 func LoadPolicy(path string) (*Policy, error) {
@@ -108,7 +109,7 @@ func (s *Service) Enforce(keepFn func(Plan) (string, *uint)) {
 		log.Printf("enforcing %q (keep %d) for target %q\n", tag, *keep, t)
 
 		if *keep > 0 {
-			if err := CreateSnapshot(t, s.policy.Prefix, tag); err != nil {
+			if err := CreateSnapshot(t, s.policy.Prefix, tag, s.policy.LocalTime); err != nil {
 				log.Printf("cannot snapshot target %q: %s\n", t, err)
 			}
 		}
@@ -257,7 +258,7 @@ func main() {
 			switch t.Minute() {
 			case 0:
 				wg.Add(1)
-				go func() { // TODO: does `t` need to be a parameter?
+				go func() {
 					defer wg.Done()
 					service.RegularJob(t)
 				}()
