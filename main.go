@@ -1,17 +1,18 @@
 package main
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
 	"log"
 	"os"
+	"os/signal"
 	"reflect"
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -239,18 +240,33 @@ func main() {
 
 	service := NewService(policy)
 
+	var wg sync.WaitGroup
+	interrupt := make(chan os.Signal, 1)
+	signal.Notify(interrupt, os.Interrupt)
+
 	ticker := time.NewTicker(time.Minute)
 	defer ticker.Stop()
 	for {
 		select {
-		case <-context.TODO().Done():
+		case <-interrupt:
+			log.Println("(!) waiting for jobs to finish")
+			wg.Wait()
+			log.Println("(!) exiting")
 			return
 		case t := <-ticker.C:
 			switch t.Minute() {
 			case 0:
-				go service.RegularJob(t)
+				wg.Add(1)
+				go func() { // TODO: does `t` need to be a parameter?
+					defer wg.Done()
+					service.RegularJob(t)
+				}()
 			case 15, 30, 45:
-				go service.FrequentJob()
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+					service.FrequentJob()
+				}()
 			}
 		}
 	}
