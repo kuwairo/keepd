@@ -19,7 +19,7 @@ var (
 )
 
 // TODO: should check for 'permission denied'?
-func CreateSnapshot(target, prefix, tag string, localTime bool) error {
+func CreateSnapshot(target, prefix, tag string, localTime, recursive bool) error {
 	t := time.Now()
 	if !localTime {
 		t = t.UTC()
@@ -28,19 +28,32 @@ func CreateSnapshot(target, prefix, tag string, localTime bool) error {
 	f := t.Format("2006-01-02.15:04:05")
 	name := fmt.Sprintf("%s.%s.%s", prefix, f, tag)
 
-	log.Printf("[+] create snapshot %s@%s\n", target, name)
+	rmark := ""
+	if recursive {
+		rmark = "[r]"
+	}
+	log.Printf("[+]%s create snapshot %s@%s\n", rmark, target, name)
 
 	ds := &zfs.Dataset{Name: target}
-	_, err := ds.Snapshot(name, false)
+	_, err := ds.Snapshot(name, recursive)
 	return err
 }
 
 // TODO: should check for 'permission denied'?
-func DestroySnapshot(target, name string) error {
-	log.Printf("[-] destroy snapshot %s@%s\n", target, name)
+func DestroySnapshot(target, name string, recursive bool) error {
+	rmark := ""
+	if recursive {
+		rmark = "[r]"
+	}
+	log.Printf("[-]%s destroy snapshot %s@%s\n", rmark, target, name)
+
+	var f zfs.DestroyFlag
+	if recursive {
+		f = zfs.DestroyRecursive
+	}
 
 	ds := &zfs.Dataset{Name: fmt.Sprintf("%s@%s", target, name)}
-	return ds.Destroy(0)
+	return ds.Destroy(f)
 }
 
 func ListSnapshotNames(target string, re *regexp.Regexp) ([][]byte, error) {

@@ -17,7 +17,8 @@ import (
 )
 
 type Plan struct {
-	Keep struct {
+	Recursive bool
+	Keep      struct {
 		Frequent *uint
 		Hourly   *uint
 		Daily    *uint
@@ -109,7 +110,8 @@ func (s *Service) Enforce(keepFn func(Plan) (string, *uint)) {
 		log.Printf("enforcing %q (keep %d) for target %q\n", tag, *keep, t)
 
 		if *keep > 0 {
-			if err := CreateSnapshot(t, s.policy.Prefix, tag, s.policy.LocalTime); err != nil {
+			prefix, localTime := s.policy.Prefix, s.policy.LocalTime
+			if err := CreateSnapshot(t, prefix, tag, localTime, p.Recursive); err != nil {
 				log.Printf("cannot snapshot target %q: %s\n", t, err)
 			}
 		}
@@ -124,7 +126,7 @@ func (s *Service) Enforce(keepFn func(Plan) (string, *uint)) {
 		}
 
 		for _, n := range names[int(*keep):] {
-			if err := DestroySnapshot(t, string(n)); err != nil {
+			if err := DestroySnapshot(t, string(n), p.Recursive); err != nil {
 				log.Printf("cannot destroy snapshot \"%s@%s\": %s\n", t, n, err)
 			}
 		}
