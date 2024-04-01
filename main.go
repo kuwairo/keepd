@@ -31,6 +31,10 @@ type Policy struct {
 	Prefix    string
 	LocalTime bool
 	Targets   map[string]Plan
+	Groups    map[string]struct {
+		Members []string
+		Plan    Plan
+	}
 }
 
 func LoadPolicy(path string) (*Policy, error) {
@@ -51,12 +55,24 @@ func LoadPolicy(path string) (*Policy, error) {
 	if p.Prefix == "" {
 		return nil, errors.New("prefix is not specified")
 	}
-
 	for _, r := range p.Prefix {
 		if r < 'a' || r > 'z' {
 			return nil, errors.New("prefix contains forbidden characters (not a-z)")
 		}
 	}
+
+	if p.Targets == nil {
+		p.Targets = make(map[string]Plan)
+	}
+	for name, g := range p.Groups {
+		for _, m := range g.Members {
+			if _, ok := p.Targets[m]; ok {
+				return nil, fmt.Errorf("group %q contains previously specified target %q", name, m)
+			}
+			p.Targets[m] = g.Plan
+		}
+	}
+	clear(p.Groups)
 
 	return &p, nil
 }
