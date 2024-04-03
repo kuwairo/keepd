@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 )
 
@@ -260,14 +261,14 @@ func main() {
 	service := NewService(policy)
 
 	var wg sync.WaitGroup
-	interrupt := make(chan os.Signal, 1)
-	signal.Notify(interrupt, os.Interrupt)
+	shutdown := make(chan os.Signal, 1)
+	signal.Notify(shutdown, syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM)
 
 	ticker := time.NewTicker(time.Minute)
 	defer ticker.Stop()
 	for {
 		select {
-		case <-interrupt:
+		case <-shutdown:
 			log.Println("(!) waiting for jobs to finish")
 			wg.Wait()
 			log.Println("(!) exiting")
