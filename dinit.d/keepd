@@ -1,6 +1,7 @@
 # keepd service
-type = process
-command = /usr/local/bin/keepd -p /etc/keepd/policy.json
+
+type         = process
+command      = /usr/local/bin/keepd -p /etc/keepd/policy.json
 stop-timeout = 90
-after = time-sync.target
-logfile = /var/log/keepd.log
+after        = time-sync.target
+logfile      = /var/log/keepd.log

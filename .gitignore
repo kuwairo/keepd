@@ -1,5 +1,2 @@
-# Binary file
 keepd
-
-# User's policy file
-policy_user.json
+policy.json
