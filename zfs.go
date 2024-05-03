@@ -14,11 +14,14 @@ import (
 )
 
 var (
-	ErrPoolNotFound    = errors.New("pool not found")
-	ErrInvalidProperty = errors.New("invalid property")
+	ErrInvalidProperty       = errors.New("invalid property")
+	ErrPermissionDenied      = errors.New("permission denied")
+	ErrPoolNotFound          = errors.New("pool not found")
+	ErrDatasetNotFound       = errors.New("target dataset not found")
+	ErrSnapshotNotFound      = errors.New("target snapshot not found")
+	ErrSnapshotAlreadyExists = errors.New("snapshot already exists")
 )
 
-// TODO: should check for 'permission denied'?
 func CreateSnapshot(target, prefix, tag string, localTime, recursive bool) error {
 	t := time.Now()
 	if !localTime {
@@ -36,10 +39,23 @@ func CreateSnapshot(target, prefix, tag string, localTime, recursive bool) error
 
 	ds := &zfs.Dataset{Name: target}
 	_, err := ds.Snapshot(name, recursive)
-	return err
+	if err != nil {
+		error := err.Error()
+		switch {
+		case strings.Contains(error, "permission denied"):
+			return errors.Join(ErrPermissionDenied, err)
+		case strings.Contains(error, "dataset does not exist"):
+			return errors.Join(ErrDatasetNotFound, err)
+		case strings.Contains(error, "dataset already exists"):
+			return errors.Join(ErrSnapshotAlreadyExists, err)
+		default:
+			return err
+		}
+	}
+
+	return nil
 }
 
-// TODO: should check for 'permission denied'?
 func DestroySnapshot(target, name string, recursive bool) error {
 	rmark := ""
 	if recursive {
@@ -53,7 +69,21 @@ func DestroySnapshot(target, name string, recursive bool) error {
 	}
 
 	ds := &zfs.Dataset{Name: fmt.Sprintf("%s@%s", target, name)}
-	return ds.Destroy(f)
+	if err := ds.Destroy(f); err != nil {
+		error := err.Error()
+		switch {
+		case strings.Contains(error, "permission denied"):
+			return errors.Join(ErrPermissionDenied, err)
+		case strings.Contains(error, "dataset does not exist"):
+			return errors.Join(ErrDatasetNotFound, err)
+		case strings.Contains(error, "could not find any snapshots to destroy"):
+			return errors.Join(ErrSnapshotNotFound, err)
+		default:
+			return err
+		}
+	}
+
+	return nil
 }
 
 func ListSnapshotNames(target string, re *regexp.Regexp) ([][]byte, error) {
@@ -73,6 +103,9 @@ func ListSnapshotNames(target string, re *regexp.Regexp) ([][]byte, error) {
 
 	out, err := c.Output()
 	if err != nil {
+		if bytes.Contains(stderr.Bytes(), []byte("dataset does not exist")) {
+			return nil, errors.Join(ErrDatasetNotFound, err)
+		}
 		return nil, fmt.Errorf("%w: %s", err, stderr.String())
 	}
 
@@ -93,19 +126,19 @@ func GetPoolProperty(pool, key string) (string, error) {
 
 	out, err := c.Output()
 	if err != nil {
-		if bytes.Contains(stderr.Bytes(), []byte("missing pool name")) {
+		switch {
+		case bytes.Contains(stderr.Bytes(), []byte("missing pool name")):
 			return "", errors.Join(ErrPoolNotFound, err)
-		}
-		if bytes.Contains(stderr.Bytes(), []byte("bad property list")) {
+		case bytes.Contains(stderr.Bytes(), []byte("bad property list")):
 			return "", errors.Join(ErrInvalidProperty, err)
+		default:
+			return "", fmt.Errorf("%w: %s", err, stderr.String())
 		}
-		return "", fmt.Errorf("%w: %s", err, stderr.String())
 	}
 
 	return strings.TrimSpace(string(out)), nil
 }
 
-// TODO: should check for 'permission denied'?
 func SetPoolProperty(pool, key, value string) error {
 	arg := []string{
 		"set",
@@ -118,13 +151,16 @@ func SetPoolProperty(pool, key, value string) error {
 	c.Stderr = &stderr
 
 	if _, err := c.Output(); err != nil {
-		if bytes.Contains(stderr.Bytes(), []byte("is not a pool")) {
+		switch {
+		case bytes.Contains(stderr.Bytes(), []byte("permission denied")):
+			return errors.Join(ErrPermissionDenied, err)
+		case bytes.Contains(stderr.Bytes(), []byte("is not a pool")):
 			return errors.Join(ErrPoolNotFound, err)
-		}
-		if bytes.Contains(stderr.Bytes(), []byte("invalid property")) {
+		case bytes.Contains(stderr.Bytes(), []byte("invalid property")):
 			return errors.Join(ErrInvalidProperty, err)
+		default:
+			return fmt.Errorf("%w: %s", err, stderr.String())
 		}
-		return fmt.Errorf("%w: %s", err, stderr.String())
 	}
 
 	return nil
