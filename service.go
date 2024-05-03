@@ -11,8 +11,28 @@ import (
 	"time"
 )
 
+type EventType int
+
+const (
+	ETCreateSnapshot EventType = iota
+	ETListSnapshotNames
+	ETDestroySnapshot
+	ETGetPoolProperty
+	ETSetPoolProperty
+)
+
+type Event struct {
+	Type      EventType
+	Success   bool
+	Timestamp time.Time
+	Target    string
+	Job       string
+	Recursive bool
+	Reason    string
+}
+
 type Journal interface {
-	Append(event Event) error
+	Add(event Event) error
 }
 
 type SnapshotMatcher map[string]*regexp.Regexp
@@ -60,12 +80,15 @@ func (s *Service) Enforce(keepFn func(Plan) (string, *uint)) {
 
 		if *keep > 0 {
 			prefix, localTime := s.policy.Prefix, s.policy.LocalTime
-			if err := CreateSnapshot(t, prefix, tag, localTime, p.Recursive); err != nil {
+			err := CreateSnapshot(t, prefix, tag, localTime, p.Recursive)
+			if err != nil {
 				log.Printf("cannot snapshot target %q: %s\n", t, err)
 			}
+			s.Emit(ETCreateSnapshot, t, tag, p.Recursive, err)
 		}
 
 		names, err := ListSnapshotNames(t, s.matcher[tag])
+		s.Emit(ETListSnapshotNames, t, tag, p.Recursive, err)
 		if err != nil {
 			log.Printf("cannot list snapshots of target %q: %s\n", t, err)
 			continue
@@ -75,9 +98,11 @@ func (s *Service) Enforce(keepFn func(Plan) (string, *uint)) {
 		}
 
 		for _, n := range names[int(*keep):] {
-			if err := DestroySnapshot(t, string(n), p.Recursive); err != nil {
+			err := DestroySnapshot(t, string(n), p.Recursive)
+			if err != nil {
 				log.Printf("cannot destroy snapshot \"%s@%s\": %s\n", t, n, err)
 			}
+			s.Emit(ETDestroySnapshot, t, tag, p.Recursive, err)
 		}
 	}
 }
@@ -139,6 +164,7 @@ func (s *Service) RegularJob(tick time.Time) {
 		for t, job := range jobsByTag {
 			key := fmt.Sprintf(keyFormat, t)
 			value, err := GetPoolProperty(p, key)
+			s.Emit(ETGetPoolProperty, p, t, false, err)
 			if err != nil {
 				switch {
 				case errors.Is(err, ErrInvalidProperty):
@@ -169,9 +195,27 @@ func (s *Service) RegularJob(tick time.Time) {
 
 		key := fmt.Sprintf(keyFormat, t)
 		for _, p := range s.pools {
-			if err := SetPoolProperty(p, key, tickValue); err != nil {
+			err := SetPoolProperty(p, key, tickValue)
+			if err != nil {
 				log.Printf("cannot set property %q of pool %q: %s\n", key, p, err)
 			}
+			s.Emit(ETSetPoolProperty, p, t, false, err)
 		}
+	}
+}
+
+func (s *Service) Emit(eventType EventType, target, job string, recursive bool, err error) {
+	event := Event{
+		Type:      eventType,
+		Success:   err == nil,
+		Timestamp: time.Now(),
+		Target:    target,
+		Job:       job,
+		Recursive: recursive,
+		Reason:    ReasonOf(err),
+	}
+
+	if err := s.events.Add(event); err != nil {
+		log.Printf("cannot add an event (code %d) to the journal: %s\n", eventType, err)
 	}
 }

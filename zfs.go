@@ -42,12 +42,12 @@ func CreateSnapshot(target, prefix, tag string, localTime, recursive bool) error
 	if err != nil {
 		error := err.Error()
 		switch {
-		case strings.Contains(error, "permission denied"):
-			return errors.Join(ErrPermissionDenied, err)
 		case strings.Contains(error, "dataset does not exist"):
 			return errors.Join(ErrDatasetNotFound, err)
 		case strings.Contains(error, "dataset already exists"):
 			return errors.Join(ErrSnapshotAlreadyExists, err)
+		case strings.Contains(error, "permission denied"):
+			return errors.Join(ErrPermissionDenied, err)
 		default:
 			return err
 		}
@@ -72,12 +72,12 @@ func DestroySnapshot(target, name string, recursive bool) error {
 	if err := ds.Destroy(f); err != nil {
 		error := err.Error()
 		switch {
-		case strings.Contains(error, "permission denied"):
-			return errors.Join(ErrPermissionDenied, err)
 		case strings.Contains(error, "dataset does not exist"):
 			return errors.Join(ErrDatasetNotFound, err)
 		case strings.Contains(error, "could not find any snapshots to destroy"):
 			return errors.Join(ErrSnapshotNotFound, err)
+		case strings.Contains(error, "permission denied"):
+			return errors.Join(ErrPermissionDenied, err)
 		default:
 			return err
 		}
@@ -152,16 +152,39 @@ func SetPoolProperty(pool, key, value string) error {
 
 	if _, err := c.Output(); err != nil {
 		switch {
-		case bytes.Contains(stderr.Bytes(), []byte("permission denied")):
-			return errors.Join(ErrPermissionDenied, err)
 		case bytes.Contains(stderr.Bytes(), []byte("is not a pool")):
 			return errors.Join(ErrPoolNotFound, err)
 		case bytes.Contains(stderr.Bytes(), []byte("invalid property")):
 			return errors.Join(ErrInvalidProperty, err)
+		case bytes.Contains(stderr.Bytes(), []byte("permission denied")):
+			return errors.Join(ErrPermissionDenied, err)
 		default:
 			return fmt.Errorf("%w: %s", err, stderr.String())
 		}
 	}
 
 	return nil
+}
+
+func ReasonOf(err error) (r string) {
+	if err == nil {
+		return r
+	}
+
+	switch {
+	case errors.Is(err, ErrDatasetNotFound):
+		r = ErrDatasetNotFound.Error()
+	case errors.Is(err, ErrPoolNotFound):
+		r = ErrPoolNotFound.Error()
+	case errors.Is(err, ErrSnapshotAlreadyExists):
+		r = ErrSnapshotAlreadyExists.Error()
+	case errors.Is(err, ErrSnapshotNotFound):
+		r = ErrSnapshotNotFound.Error()
+	case errors.Is(err, ErrInvalidProperty):
+		r = ErrInvalidProperty.Error()
+	case errors.Is(err, ErrPermissionDenied):
+		r = ErrPermissionDenied.Error()
+	}
+
+	return r
 }
