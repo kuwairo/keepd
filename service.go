@@ -88,7 +88,7 @@ func (s *Service) Enforce(keepFn func(Plan) (string, *uint)) {
 		}
 
 		names, err := ListSnapshotNames(t, s.matcher[tag])
-		s.Emit(ETListSnapshotNames, t, tag, p.Recursive, err)
+		s.Emit(ETListSnapshotNames, t, tag, false, err)
 		if err != nil {
 			log.Printf("cannot list snapshots of target %q: %s\n", t, err)
 			continue
@@ -102,7 +102,7 @@ func (s *Service) Enforce(keepFn func(Plan) (string, *uint)) {
 			if err != nil {
 				log.Printf("cannot destroy snapshot \"%s@%s\": %s\n", t, n, err)
 			}
-			s.Emit(ETDestroySnapshot, t, tag, p.Recursive, err)
+			s.Emit(ETDestroySnapshot, fmt.Sprintf("%s@%s", t, n), tag, p.Recursive, err)
 		}
 	}
 }
