@@ -1,0 +1,13 @@
+[Unit]
+Description=Periodic ZFS snapshot daemon
+After=time-sync.target
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+ExecStart=/usr/local/bin/keepd -p /etc/keepd/policy.json -j /var/lib/keepd/journal.db
+RestartSec=10
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
