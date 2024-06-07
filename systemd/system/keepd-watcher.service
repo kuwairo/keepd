@@ -1,0 +1,10 @@
+[Unit]
+Description=Watcher for keepd
+After=time-sync.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/systemctl restart keepd.service
+
+[Install]
+WantedBy=multi-user.target

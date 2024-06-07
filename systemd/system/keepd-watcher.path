@@ -1,0 +1,5 @@
+[Path]
+PathChanged=/etc/keepd/policy.json
+
+[Install]
+WantedBy=multi-user.target
